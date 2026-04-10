@@ -19,7 +19,7 @@ document.docx (ZIP)
 ```xml
 <w:p>                         <!-- 段落 -->
   <w:pPr>                     <!-- 段落属性 -->
-    <w:pStyle w:val="15"/>    <!-- 引用样式 ID=15 (hik标题4) -->
+    <w:pStyle w:val="15"/>    <!-- 引用样式 ID=15 (ryusuke标题4) -->
     <w:numPr>
       <w:ilvl w:val="3"/>     <!-- 编号级别 3 = 四级标题 -->
       <w:numId w:val="1"/>    <!-- 编号列表 ID=1 -->
@@ -59,32 +59,32 @@ document.docx (ZIP)
 | 1008 | 1.78 | 0.70 | 1,278,720 |
 | 1440 | 2.54 | 1.00 | 1,828,800 |
 
-## HIK 样式体系参考
+## ryusuke 样式体系参考
 
-本 Skill 针对华数/海康威视(HIK)投标文档的典型样式体系：
+本 Skill 针对ryusuke投标文档的典型样式体系：
 
 | styleId | 名称 | 类型 | 典型属性 |
 |---------|------|------|----------|
-| 12 | hik标题1 | 章标题 | 居中, 16pt加粗, chineseCounting(第N章) |
-| 13 | hik标题2 | 二级标题 | 18pt, %1.%2. |
-| 14 | hik标题3 | 三级标题 | 15pt加粗, %1.%2.%3. |
-| **15** | **hik标题4** | **四级标题** | **12pt黑体加粗, %1.%2.%3.%4.** |
-| **16** | **hik标题5** | **五级标题** | **加粗, %1.%2.%3.%4.%5.** |
-| 17 | HIK-标题6 | 六级标题 | %1...%6. |
-| 11 | hik正文 | 正文 | 宋体, 12pt |
-| 25 | hik首行缩进两字符 | 缩进正文 | 首行缩进2字符 |
+| 12 | ryusuke标题1 | 章标题 | 居中, 16pt加粗, chineseCounting(第N章) |
+| 13 | ryusuke标题2 | 二级标题 | 18pt, %1.%2. |
+| 14 | ryusuke标题3 | 三级标题 | 15pt加粗, %1.%2.%3. |
+| **15** | **ryusuke标题4** | **四级标题** | **12pt黑体加粗, %1.%2.%3.%4.** |
+| **16** | **ryusuke标题5** | **五级标题** | **加粗, %1.%2.%3.%4.%5.** |
+| 17 | ryusuke-标题6 | 六级标题 | %1...%6. |
+| 11 | ryusuke正文 | 正文 | 宋体, 12pt |
+| 25 | ryusuke首行缩进两字符 | 缩进正文 | 首行缩进2字符 |
 
 ## 编号系统 (numbering.xml)
 
 编号由 `abstractNum` 定义模板，`num` 引用实例：
 
 ```xml
-<!-- 抽象编号模板 (abstractNumId=1 是 HIK 体系) -->
+<!-- 抽象编号模板 (abstractNumId=1 是 ryusuke 体系) -->
 <w:abstractNum w:abstractNumId="1">
   <w:lvl w:ilvl="3">           <!-- 四级标题对应 ilvl=3 -->
     <w:start w:val="1"/>
     <w:numFmt w:val="decimal"/>
-    <w:pStyle w:val="15"/>     <!-- 关联样式 hik标题4 -->
+    <w:pStyle w:val="15"/>     <!-- 关联样式 ryusuke标题4 -->
     <w:lvlText w:val="%1.%2.%3.%4."/>  <!-- 编号格式 -->
     <w:ind w:left="360" w:hanging="360"/> <!-- ★ 缩进控制 -->
   </w:lvl>

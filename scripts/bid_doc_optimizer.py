@@ -22,7 +22,7 @@ Word 投标文档一键优化工具（完整版 V3）
     - 清除正文中被误加的数字前缀
 
   Phase 2 — 样式美化
-    - 智能识别并套用 hik标题4 / hik标题5 样式
+    - 智能识别并套用 ryusuke标题4 / ryusuke标题5 样式
     - 清除重复编号（样式自动编号 vs 文本硬编码冲突）
     - 为中文正文添加首行缩进
     - 优化多级列表缩进值
@@ -45,10 +45,10 @@ import os, re, sys, argparse, zipfile, shutil, tempfile
 # ============================================================
 # 常量
 # ============================================================
-STYLE_HIK_H4 = "15"       # hik标题4
-STYLE_HIK_H5 = "16"       # hik标题5
-STYLE_HIK_BODY = "11"     # hik正文
-STYLE_HIK_INDENT = "25"   # hik首行缩进两字符
+STYLE_RYUSUKE_H4 = "15"       # ryusuke标题4
+STYLE_RYUSUKE_H5 = "16"       # ryusuke标题5
+STYLE_RYUSUKE_BODY = "11"     # ryusuke正文
+STYLE_RYUSUKE_INDENT = "25"   # ryusuke首行缩进两字符
 DEFAULT_INDENT_H4 = 360
 DEFAULT_INDENT_H5 = 480
 
@@ -218,11 +218,11 @@ def phase0_fix_heading_numbering(doc_xml, num_xml, styles_xml):
     print('\n  [B] 统一 styles.xml — 所有标题样式指向同一多级列表...')
 
     target_map = {
-        '12': ('0', 'hik标题1/章节'),
-        '13': ('1', 'hik标题2/H2'),
-        '14': ('2', 'hik标题3/H3'),
-        '15': ('3', 'hik标题4/H4'),
-        '16': ('4', 'hik标题5/H5'),
+        '12': ('0', 'ryusuke标题1/章节'),
+        '13': ('1', 'ryusuke标题2/H2'),
+        '14': ('2', 'ryusuke标题3/H3'),
+        '15': ('3', 'ryusuke标题4/H4'),
+        '16': ('4', 'ryusuke标题5/H5'),
     }
     style_fix_log = []
 
@@ -618,7 +618,7 @@ def step_apply_heading_styles(content):
         # 五级: X.X.X.X.X 文字 (5个数字捕获组 + 1个文本 = group6)
         m5 = re.match(r'^(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)[ \t]*(.*)$', full_text)
         if m5 and is_likely_heading(m5.group(6)):
-            new_pPr = insert_pStyle(p_body, STYLE_HIK_H5)
+            new_pPr = insert_pStyle(p_body, STYLE_RYUSUKE_H5)
             if new_pPr != p_body:
                 counters['h5'] += 1
                 modifications.append((m.start(2), m.end(2), new_pPr))
@@ -627,7 +627,7 @@ def step_apply_heading_styles(content):
         # 四级: X.X.X.X 文字
         m4 = re.match(r'^(\d+)\.(\d+)\.(\d+)\.(\d+)([ \t]*)(.*)$', full_text)
         if m4 and is_likely_heading(m4.group(6)):
-            new_pPr = insert_pStyle(p_body, STYLE_HIK_H4)
+            new_pPr = insert_pStyle(p_body, STYLE_RYUSUKE_H4)
             if new_pPr != p_body:
                 counters['h4'] += 1
                 modifications.append((m.start(2), m.end(2), new_pPr))
@@ -646,7 +646,7 @@ def step_strip_duplicate_prefixes(content):
 
     for m in paras:
         p_body = m.group(2)
-        if not re.search(rf'w:val="({STYLE_HIK_H4}|{STYLE_HIK_H5})"', p_body):
+        if not re.search(rf'w:val="({STYLE_RYUSUKE_H4}|{STYLE_RYUSUKE_H5})"', p_body):
             continue
 
         t_match = re.search(r'(<w:t[^>]*>)([^<]*)(</w:t>)', p_body)
@@ -690,7 +690,7 @@ def step_apply_body_indent(content):
         if re.match(r'^\d+\.', full_text):
             continue
 
-        new_pPr = insert_pStyle(p_body, STYLE_HIK_INDENT)
+        new_pPr = insert_pStyle(p_body, STYLE_RYUSUKE_INDENT)
         if new_pPr != p_body:
             body_count += 1
             modifications.append((m.start(2), m.end(2), new_pPr))
@@ -723,48 +723,161 @@ def optimize_numbering(num_xml, indent_h4=DEFAULT_INDENT_H4, indent_h5=DEFAULT_I
     return result, changes
 
 
+def find_heading_style_id(style_xml, level):
+    """按样式名称识别当前文档里的标题样式 ID，兼容 Word/WPS 内置标题。"""
+    candidates = {
+        f'heading {level}',
+        f'title {level}',
+        f'标题 {level}',
+        f'标题{level}',
+        f'ryusuke标题{level}',
+    }
+    style_pattern = r'<w:style\b(?=[^>]*w:type="paragraph")(?=[^>]*w:styleId="([^"]+)")[^>]*>.*?</w:style>'
+    for m in re.finditer(style_pattern, style_xml, re.DOTALL):
+        block = m.group(0)
+        name = re.search(r'<w:name w:val="([^"]+)"', block)
+        if name and name.group(1).strip().lower() in {c.lower() for c in candidates}:
+            return m.group(1)
+
+    builtin_style_ids = {1: "2", 2: "3", 3: "4", 4: "5", 5: "6"}
+    fallback = builtin_style_ids.get(level)
+    if fallback and re.search(
+        rf'<w:style\b(?=[^>]*w:type="paragraph")(?=[^>]*w:styleId="{re.escape(fallback)}")',
+        style_xml,
+    ):
+        return fallback
+    return None
+
+
+def resolve_ryusuke_heading_style_ids(style_xml):
+    """把脚本内部 H4/H5 指向当前文档真实标题样式，避免固定 styleId 误伤。"""
+    global STYLE_RYUSUKE_H4, STYLE_RYUSUKE_H5
+    messages = []
+
+    h4_id = find_heading_style_id(style_xml, 4)
+    if h4_id and h4_id != STYLE_RYUSUKE_H4:
+        STYLE_RYUSUKE_H4 = h4_id
+        messages.append(f'四级标题样式绑定为 styleId={h4_id}')
+
+    h5_id = find_heading_style_id(style_xml, 5)
+    if h5_id and h5_id != STYLE_RYUSUKE_H5:
+        STYLE_RYUSUKE_H5 = h5_id
+        messages.append(f'五级标题样式绑定为 styleId={h5_id}')
+    else:
+        h5_para_re = rf'<w:style\b(?=[^>]*w:type="paragraph")(?=[^>]*w:styleId="{re.escape(STYLE_RYUSUKE_H5)}")'
+        if not re.search(h5_para_re, style_xml) and STYLE_RYUSUKE_H5 == "16" and 'w:styleId="16"' in style_xml:
+            STYLE_RYUSUKE_H5 = "ryusukeHeading5"
+            messages.append('styleId=16 已被非段落样式占用，改用 ryusukeHeading5 创建五级标题样式')
+
+    return messages
+
+
+def rename_ryusuke_heading_style_names(style_xml):
+    """把 1-5 级标题样式在样式面板中的显示名统一为 ryusuke标题N。"""
+    result = style_xml
+    changes = []
+
+    for level in range(1, 6):
+        style_id = find_heading_style_id(result, level)
+        if not style_id:
+            continue
+
+        style_re = rf'(<w:style\b(?=[^>]*w:type="paragraph")(?=[^>]*w:styleId="{re.escape(style_id)}")[^>]*>)(.*?)(</w:style>)'
+        m = re.search(style_re, result, re.DOTALL)
+        if not m:
+            continue
+
+        target_name = f'ryusuke标题{level}'
+        block = m.group(2)
+        name_re = r'<w:name w:val="([^"]+)"/>'
+        name_match = re.search(name_re, block)
+        if name_match and name_match.group(1) == target_name:
+            continue
+
+        if name_match:
+            new_block = re.sub(name_re, f'<w:name w:val="{target_name}"/>', block, count=1)
+        else:
+            new_block = f'<w:name w:val="{target_name}"/>' + block
+
+        result = result[:m.start(2)] + new_block + result[m.end(2):]
+        changes.append(f'标题{level}: 显示名改为{target_name}(styleId={style_id})')
+
+    return result, changes
+
+
 def optimize_styles(style_xml):
-    """精修 hik标题4/5 样式属性"""
+    """精修 ryusuke标题样式属性"""
     changes = []
     result = style_xml
 
-    # --- hik标题4 ---
+    h5_style_re = rf'<w:style[^>]*w:type="paragraph"[^>]*w:styleId="{re.escape(STYLE_RYUSUKE_H5)}"'
+    if not re.search(h5_style_re, result):
+        based_on = '6' if 'w:styleId="6"' in result else '1'
+        h5_style = (
+            f'<w:style w:type="paragraph" w:customStyle="1" w:styleId="{STYLE_RYUSUKE_H5}">'
+            '<w:name w:val="ryusuke标题5"/>'
+            f'<w:basedOn w:val="{based_on}"/>'
+            '<w:next w:val="1"/>'
+            '<w:uiPriority w:val="9"/>'
+            '<w:qFormat/>'
+            '<w:pPr>'
+            '<w:keepNext/>'
+            '<w:keepLines/>'
+            '<w:numPr><w:ilvl w:val="4"/><w:numId w:val="1"/></w:numPr>'
+            '<w:spacing w:before="40" w:after="20" w:line="276" w:lineRule="auto"/>'
+            '<w:ind w:left="480" w:hanging="480"/>'
+            '<w:outlineLvl w:val="4"/>'
+            '</w:pPr>'
+            '<w:rPr>'
+            '<w:rFonts w:ascii="黑体" w:hAnsi="黑体" w:eastAsia="黑体" w:cs="黑体"/>'
+            '<w:b/>'
+            '<w:sz w:val="21"/><w:szCs w:val="21"/>'
+            '</w:rPr>'
+            '</w:style>'
+        )
+        result = result.replace('</w:styles>', h5_style + '</w:styles>')
+        changes.append(f'ryusuke标题5: 新增五级标题样式(styleId={STYLE_RYUSUKE_H5})')
+
+    result, rename_changes = rename_ryusuke_heading_style_names(result)
+    changes.extend(rename_changes)
+
+    # --- ryusuke标题4 ---
     old_s = r'<w:spacing w:before="120" w:after="120" w:line="360" w:lineRule="auto"/>'
     new_s = '<w:spacing w:before="60" w:after="40" w:line="280" w:lineRule="auto"/>'
     if re.search(old_s, result):
         result = re.sub(old_s, new_s, result)
-        changes.append('hik标题4: 段前6pt→3pt, 段后6pt→2pt, 行距280')
+        changes.append('ryusuke标题4: 段前6pt→3pt, 段后6pt→2pt, 行距280')
 
     old_f = r'<w:rFonts w:ascii="黑体" w:hAnsi="宋体" w:eastAsia="黑体" w:cs="Times New Roman"/>'
     new_f = '<w:rFonts w:ascii="黑体" w:hAnsi="黑体" w:eastAsia="黑体" w:cs="黑体"/>'
     if re.search(old_f, result):
         result = re.sub(old_f, new_f, result)
-        changes.append('hik标题4: 字体统一黑体')
+        changes.append('ryusuke标题4: 字体统一黑体')
 
-    # --- hik标题5 ---
+    # --- ryusuke标题5 ---
     m5ppr = re.search(
-        r'(<w:style w:type="paragraph"[^>]*w:styleId="16"[^>]*>.*?<w:pPr>)(.*?)(</w:pPr>)',
+        rf'(<w:style w:type="paragraph"[^>]*w:styleId="{re.escape(STYLE_RYUSUKE_H5)}"[^>]*>.*?<w:pPr>)(.*?)(</w:pPr>)',
         result, re.DOTALL)
     if m5ppr:
         pc = m5ppr.group(2)
         if not re.search('<w:spacing', pc):
             npc = pc + '<w:spacing w:before="40" w:after="20" w:line="276" w:lineRule="auto"/>'
             result = result[:m5ppr.start(2)] + npc + result[m5ppr.end(2):]
-            changes.append('hik标题5: 新增段前2pt/段后1pt/行距')
+            changes.append('ryusuke标题5: 新增段前2pt/段后1pt/行距')
 
     old_h5f = r'<w:rFonts w:ascii="宋体" w:hAnsi="黑体" w:eastAsia="宋体" w:cs="宋体"/>'
     new_h5f = '<w:rFonts w:ascii="黑体" w:hAnsi="黑体" w:eastAsia="黑体" w:cs="黑体"/>'
     if re.search(old_h5f, result):
         result = re.sub(old_h5f, new_h5f, result)
-        changes.append('hik标题5: 字体改为黑体')
+        changes.append('ryusuke标题5: 字体改为黑体')
 
     m5rpr = re.search(
-        r'(<w:style w:type="paragraph"[^>]*w:styleId="16"[^>]*>.*?<w:rPr>)(.*?)(</w:rPr>)',
+        rf'(<w:style w:type="paragraph"[^>]*w:styleId="{re.escape(STYLE_RYUSUKE_H5)}"[^>]*>.*?<w:rPr>)(.*?)(</w:rPr>)',
         result, re.DOTALL)
     if m5rpr and not re.search('<w:sz ', m5rpr.group(2)):
         nr = m5rpr.group(2) + '<w:sz w:val="21"/><w:szCs w:val="21"/>'
         result = result[:m5rpr.start(2)] + nr + result[m5rpr.end(2):]
-        changes.append('hik标题5: 新增字号10.5pt')
+        changes.append('ryusuke标题5: 新增字号10.5pt')
 
     return result, changes
 
@@ -779,11 +892,14 @@ def phase2_beautify(xml_content, num_xml, sty_xml,
     print('  PHASE 2: 样式美化')
     print('='*55)
 
+    for msg in resolve_ryusuke_heading_style_ids(sty_xml):
+        print(f'  ⚠ {msg}')
+
     # Step A: 套用 H4/H5 标题样式
     print('\n  [A] 识别并套用 H4/H5 标题样式...')
     doc_xml, h4_cnt, h5_cnt = step_apply_heading_styles(xml_content)
-    print(f'      ✓ 四级标题(hik标题4): +{h4_cnt}')
-    print(f'      ✓ 五级标题(hik标题5): +{h5_cnt}')
+    print(f'      ✓ 四级标题(ryusuke标题4): +{h4_cnt}')
+    print(f'      ✓ 五级标题(ryusuke标题5): +{h5_cnt}')
 
     # Step B: 清除重复编号前缀
     print('\n  [B] 清除标题中重复编号前缀...')
@@ -801,7 +917,7 @@ def phase2_beautify(xml_content, num_xml, sty_xml,
     for c in num_changes:
         print(f'      ✓ {c}')
     if not num_changes:
-        print(f'      ⚠ 未找到HIK编号体系定义')
+        print(f'      ⚠ 未找到ryusuke编号体系定义')
 
     # Step E: 样式属性精修
     print('\n  [E] 优化标题样式属性...')
@@ -874,22 +990,36 @@ def main():
 
         with open(doc_path, 'r', encoding='utf-8') as f:
             doc_xml = f.read()
-        with open(num_path, 'r', encoding='utf-8') as f:
-            num_xml = f.read()
-        with open(sty_path, 'r', encoding='utf-8') as f:
-            sty_xml = f.read()
+        has_numbering = os.path.exists(num_path)
+        if has_numbering:
+            with open(num_path, 'r', encoding='utf-8') as f:
+                num_xml = f.read()
+        else:
+            num_xml = ''
+            print('   ⚠ word/numbering.xml 不存在，将跳过依赖编号定义的修复步骤')
+        has_styles = os.path.exists(sty_path)
+        if has_styles:
+            with open(sty_path, 'r', encoding='utf-8') as f:
+                sty_xml = f.read()
+        else:
+            sty_xml = ''
+            print('   ⚠ word/styles.xml 不存在，将跳过依赖样式定义的修复步骤')
 
         # ---- Phase 0: 根本性编号修复（三层面统一） ----
         rpt0 = {}
         if args.phase in ('0', 'all'):
-            doc_xml, num_xml, styles_xml, rpt0 = phase0_fix_heading_numbering(doc_xml, num_xml, sty_xml)
+            if not has_numbering or not has_styles:
+                print('\n⚠ 跳过 Phase 0：当前文档缺少 numbering.xml 或 styles.xml')
+                styles_xml = sty_xml
+            else:
+                doc_xml, num_xml, styles_xml, rpt0 = phase0_fix_heading_numbering(doc_xml, num_xml, sty_xml)
 
-            with open(doc_path, 'w', encoding='utf-8') as f:
-                f.write(doc_xml)
-            with open(num_path, 'w', encoding='utf-8') as f:
-                f.write(num_xml)
-            with open(sty_path, 'w', encoding='utf-8') as f:
-                f.write(styles_xml)
+                with open(doc_path, 'w', encoding='utf-8') as f:
+                    f.write(doc_xml)
+                with open(num_path, 'w', encoding='utf-8') as f:
+                    f.write(num_xml)
+                with open(sty_path, 'w', encoding='utf-8') as f:
+                    f.write(styles_xml)
 
         # ---- Phase 1: 编号修复 ----
         rpt1 = {}
@@ -903,15 +1033,19 @@ def main():
         # ---- Phase 2: 样式美化 ----
         rpt2 = {}
         if args.phase in ('2', 'all'):
-            doc_xml, num_xml, sty_xml, rpt2 = phase2_beautify(
-                doc_xml, num_xml, sty_xml, args.indent_h4, args.indent_h5)
+            if not has_styles:
+                print('\n⚠ 跳过 Phase 2：当前文档没有 styles.xml')
+            else:
+                doc_xml, num_xml, sty_xml, rpt2 = phase2_beautify(
+                    doc_xml, num_xml, sty_xml, args.indent_h4, args.indent_h5)
 
-            with open(doc_path, 'w', encoding='utf-8') as f:
-                f.write(doc_xml)
-            with open(num_path, 'w', encoding='utf-8') as f:
-                f.write(num_xml)
-            with open(sty_path, 'w', encoding='utf-8') as f:
-                f.write(sty_xml)
+                with open(doc_path, 'w', encoding='utf-8') as f:
+                    f.write(doc_xml)
+                if has_numbering:
+                    with open(num_path, 'w', encoding='utf-8') as f:
+                        f.write(num_xml)
+                with open(sty_path, 'w', encoding='utf-8') as f:
+                    f.write(sty_xml)
 
         # 验证 & 打包
         final_paras = count_paragraphs(doc_path)
