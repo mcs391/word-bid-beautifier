@@ -1,21 +1,24 @@
 ---
 name: word-bid-beautifier
-description: "Word投标文档一键优化工具。当用户要求优化Word文档的标题样式、缩进排版、编号格式、字体间距等美化操作时触发，特别适用于华数/海康威视(HIK)格式的投标技术文件。支持自动识别四级/五级标题、修复层级编号断层、清除重复编号、调整缩进值、修复H2/H3章节号跟随、优化字体和段落间距。"
+description: "Word投标文档一键优化工具。当用户要求优化Word文档的标题样式、缩进排版、编号格式、字体间距等美化操作时触发，特别适用于华数/海康威视(HIK)格式的投标技术文件。支持自动识别四级/五级标题、修复层级编号断层、清除重复编号、调整缩进值、根本性修复H2/H3编号分裂(三层面统一)、优化字体和段落间距。"
 ---
 
-# Word 投标文档一键优化工具 (word-bid-beautifier) V3
+# Word 投标文档一键优化工具 (word-bid-beautifier) V3.1
 
 ## 概述
 
 本 Skill 提供**一条龙**的 Word 投标文档全流程优化方案，整合**三大核心能力**：
 
-### Phase 0 — H2/H3 编号跟随修复 ⭐ NEW
-解决"第10章后二级标题仍显示9.6等旧编号"的问题：
+### Phase 0 — 根本性编号修复（三层面统一）⭐ V2
+> **核心价值：修复后手动套用 hik标题2/3 样式时，Word 会自动继承正确的章节号计数**
 
-| 现象 | 原因 | 修复方式 |
-|------|------|----------|
-| 第10章的 H2 显示 `9.6.` 而非 `10.1` | 段落缺少 `<w:numPr>` | 插入 numPr + 正确 ilvl |
-| H3 显示 `9.6.1.` 而非 `10.1.1` | 同上 | 同上 |
+解决「第14章下手动套用 H2 样式后编号显示 9.x 而非 14.x」的根本问题：
+
+| 层面 | 文件 | 修复内容 | 解决的问题 |
+|------|------|----------|-----------|
+| **层面一** | `numbering.xml` | 补全主多级列表 `abstractNumId=0` 的 pStyle 链接 (ilvl=1→style13, ilvl=2→style14) | 多级列表定义缺少样式绑定 |
+| **层面二** | `styles.xml` | 统一所有标题样式(12~16)的 numPr 指向同一个多级列表实例(numId=1→abs#0) | 不同样式指向不同 abstractNum 导致"编号分裂" |
+| **层面三** | `document.xml` | 为缺失 numPr 的标题段落(12~16)插入正确编号引用 | 段落级缺少编号引用 |
 
 利用 Word 多级列表定义（abstractNumId=1）：
 ```
@@ -103,12 +106,22 @@ python scripts/bid_doc_optimizer.py input.docx output.docx \
 
 ### 方式二：分步手动操作（需精细控制时）
 
-#### Phase 0 分步详解：H2/H3 编号跟随修复
+#### Phase 0 分步详解：根本性编号修复（三层面统一）
 
-**Step A — 定位编号实例**
-在 `numbering.xml` 中找到引用 `abstractNumId=1` 的 `numId`。如果不存在则创建新实例。
+**Step A — 层面一：修复 numbering.xml**
+在 `abstractNumId=0`（主多级列表）中补全 pStyle 链接：
+- 检查 ilvl=1 是否有 `<w:pStyle w:val="13"/>`，没有则插入
+- 检查 ilvl=2 是否有 `<w:pStyle w:val="14"/>`，没有则插入
 
-**Step B — 插入 numPr 到段落**
+**Step B — 层面二：统一 styles.xml**
+遍历所有标题样式(style12~16)：
+- 检查每个样式的 numPr 是否指向 `numId=1`(→abstractNumId=0)
+- 不正确或缺失的统一修正为正确的 numPr + ilvl
+  - style12 → (numId=1, ilvl=0), style13 → (numId=1, ilvl=1)
+  - style14 → (numId=1, ilvl=2), style15 → (numId=1, ilvl=3)
+  - style16 → (numId=1, ilvl=4)
+
+**Step C — 层面三：补全 document.xml**
 
 遍历所有段落，对以下样式插入对应的 `<w:numPr>`：
 
@@ -117,13 +130,11 @@ python scripts/bid_doc_optimizer.py input.docx output.docx \
 | 章节标题 | 12 | ilvl=0 | 第N章 |
 | 二级标题 (H2) | 13 | ilvl=1 | N.M. |
 | 三级标题 (H3) | 14 | ilvl=2 | N.M.K. |
+| 四级标题 (H4) | 15 | ilvl=3 | N.M.K.L. |
+| 五级标题 (H5) | 16 | ilvl=4 | N.M.K.L.O. |
 
-插入位置：在 `<w:pPr>` 标签内部（或创建 pPr）。
-
-**Step C — 清除残留前缀**
+**Step D — 清除残留前缀**
 删除文本中的旧编号前缀（如 `9.6.`），避免与自动编号重复显示。
-
-⚠️ **必须使用位置切片倒序替换**！正则嵌套匹配 `<w:p>...</w:p>` 不可靠。
 
 #### Phase 1 分步详解
 
@@ -208,11 +219,15 @@ word-bid-beautifier/
 
 ═════════ 汇总报告 ══════════
 
-📋 Phase 0 - H2/H3 编号跟随修复:
-   • 章节标题插入numPr: N 处
-   • 二级标题插入numPr: N 处
-   • 三级标题插入numPr: N 处
-   • 残留编号前缀清除:   N 处
+📋 Phase 0 - 根本性编号修复（三层面统一）:
+   • numbering.xml: 补全主列表pStyle链接
+   • styles.xml: 统一 N 个样式的numPr
+   • 章节标题(style12)插入numPr: N 处
+   • 二级标题(style13)插入numPr: N 处
+   • 三级标题(style14)插入numPr: N 处
+   • 四级标题(style15)插入numPr: N 处
+   • 五级标题(style16)插入numPr: N 处
+   • 残留编号前缀清除:       N 处
 
 📋 Phase 1 - 编号层级修复:
    • 层级编号修复:   N 处
