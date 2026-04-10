@@ -5,10 +5,14 @@ Word 投标文档一键优化工具（完整版 V3）
 整合三大功能，一条命令搞定投标文件全流程优化。
 
 功能：
-  Phase 0 — H2/H3 编号跟随修复 ★NEW★
-    - 为章节/H2/H3 段落插入 <w:numPr>，让 Word 自动按章节生成正确编号
-      例: 第9章 → 第10章, 9.6 → 10.1, 9.6.1 → 10.1.1 ...
-      解决"第10章后H2/H3仍显示旧章节号(如9.6)"的问题
+  Phase 0 — 根本性编号修复 ★V2★ (三层面统一)
+    - 层面一 numbering.xml: 补全主多级列表的 pStyle 链接
+      确保 abstractNumId 主列表的 ilvl=1→style13(H2), ilvl=2→style14(H3)
+    - 层面二 styles.xml: 统一样式定义中的 numPr
+      所有标题样式(12~16)的 numPr 指向同一个多级列表实例
+    - 层面三 document.xml: 为缺失 numPr 的标题段落插入正确引用
+      解决"手动套用H2/H3后编号显示9.x而非14.x"的问题
+      例: 第14章下手动添加的H2→14.1, H3→14.1.1（而非9.x）
     - 清除文本中残留的编号前缀避免重复显示
 
   Phase 1 — 编号层级修复
@@ -142,118 +146,233 @@ def find_all_paras_positions(xml_content):
     return paras
 
 
-def phase0_fix_heading_numbering(doc_xml, num_xml):
+def phase0_fix_heading_numbering(doc_xml, num_xml, styles_xml):
     """
-    Phase 0: 为章节/H2/H3 段落插入 numPr，让 Word 自动生成正确编号。
-
-    abstractNumId=1 的多级列表定义:
-      ilvl=0: 第%1章 → style 12 (章标题)
-      ilvl=1: %1.%2.   → style 13 (二级标题 H2)
-      ilvl=2: %1.%2.%3.→ style 14 (三级标题 H3)
-
-    返回: (modified_doc_xml, modified_num_xml, report_dict)
+    Phase 0 V2: 根本性编号修复 — 三层面统一
+    
+    层面一: numbering.xml — 补全主多级列表的 pStyle 链接
+      确保 abstractNumId 主列表的 ilvl=1→style13(H2), ilvl=2→style14(H3)
+    
+    层面二: styles.xml — 统一样式定义中的 numPr
+      所有标题样式(12~16)的 numPr 指向同一个多级列表实例
+    
+    层面三: document.xml — 补全段落级缺失的 numPr
+      为没有 numPr 的标题段落插入正确的编号引用
+    
+    返回: (modified_doc_xml, modified_num_xml, modified_styles_xml, report_dict)
     """
     print('\n' + '='*55)
-    print('  PHASE 0: H2/H3 编号跟随修复')
+    print('  PHASE 0: 根本性编号修复（三层面统一）')
     print('='*55)
 
-    # Step A: 找到引用 abstractNumId=1 的 numId
-    print('\n  [A] 查找编号实例...')
-    nums = re.findall(r'<w:num w:numId="(\d+)">(.*?)</w:num>', num_xml, re.DOTALL)
-    target_num_id = None
-    for nid, ncontent in nums:
-        abs_m = re.search(r'<w:abstractNumId w:val="(\d+)"/>', ncontent)
-        if abs_m and abs_m.group(1) == '1':
-            target_num_id = nid
-            break
+    UNIFIED_NUM_ID = "1"  # numId=1 → abstractNumId=0 (主多级列表)
 
-    if target_num_id is None:
-        max_nid = max(int(nid) for nid, _ in nums) if nums else 0
-        target_num_id = str(max_nid + 1)
-        new_num = f'<w:num w:numId="{target_num_id}"><w:abstractNumId w:val="1"/></w:num>'
-        num_xml = num_xml.replace('</w:numbering>', new_num + '\n</w:numbering>')
+    # ===== 层面一: Step A — 修复 numbering.xml =====
+    print('\n  [A] 修复 numbering.xml — 补全主列表的 pStyle 链接...')
 
-    print(f'      ✓ numId={target_num_id} → abstractNumId=1 (主多级列表)')
+    abs_pattern = r'<w:abstractNum[^>]*w:abstractNumId="(0)"[^>]*>(.*?)</w:abstractNum>'
+    abs_match = re.search(abs_pattern, num_xml, re.DOTALL)
 
-    # Build numPr strings for each level
-    numPr_ch = f'<w:numPr><w:numId w:val="{target_num_id}"/><w:ilvl w:val="0"/></w:numPr>'
-    numPr_h2 = f'<w:numPr><w:numId w:val="{target_num_id}"/><w:ilvl w:val="1"/></w:numPr>'
-    numPr_h3 = f'<w:numPr><w:numId w:val="{target_num_id}"/><w:ilvl w:val="2"/></w:numPr>'
+    if not abs_match:
+        print('      ⚠ 找不到 abstractNumId=0，跳过层面一')
+    else:
+        abs_content = abs_match.group(2)
+        pstyle_fixes = {
+            1: '13',   # ilvl=1 → style13(H2)
+            2: '14',   # ilvl=2 → style14(H3)
+        }
+        abs_modifications = []
+        for ilvl_val, style_id in pstyle_fixes.items():
+            ilvl_str = str(ilvl_val)
+            lvl_pattern = rf'(<w:lvl w:ilvl="{ilvl_str}"[^>]*>)(.*?)(</w:lvl>)'
+            lvl_m = re.search(lvl_pattern, abs_content, re.DOTALL)
+            if not lvl_m:
+                continue
+            lvl_inner = lvl_m.group(2)
+            existing_ps = re.search(r'<w:pStyle w:val="(\d+)"', lvl_inner)
+            if existing_ps and existing_ps.group(1) == style_id:
+                print(f'      ✓ ilvl={ilvl_str}: 已有 pStyle→{style_id}')
+                continue
+            if existing_ps:
+                old_style = existing_ps.group(1)
+                new_inner = lvl_inner.replace(
+                    f'<w:pStyle w:val="{old_style}"/>',
+                    f'<w:pStyle w:val="{style_id}"/>', 1)
+                print(f'      🔧 ilvl={ilvl_str}: pStyle {old_style}→{style_id}')
+            else:
+                if '<w:pPr>' in lvl_inner:
+                    new_inner = lvl_inner.replace('<w:pPr>',
+                        f'<w:pPr><w:pStyle w:val="{style_id}"/>', 1)
+                else:
+                    new_inner = lvl_inner.rstrip()[:-len('</w:lvl>')].rstrip()
+                    new_inner += f'\n<w:pPr><w:pStyle w:val="{style_id}"/></w:pPr>\n</w:lvl>'
+                print(f'      + ilvl={ilvl_str}: 新增 pStyle→{style_id}')
+            abs_modifications.append((lvl_m.start(2), lvl_m.end(2), new_inner))
 
-    # Step B: 遍历所有段落，为 style 12/13/14 插入 numPr
-    print('\n  [B] 为章节/H2/H3 插入编号引用...')
-    all_paras = find_all_paras_positions(doc_xml)
+        for s, e, nc in reversed(abs_modifications):
+            abs_content = abs_content[:s] + nc + abs_content[e:]
+        num_xml = num_xml[:abs_match.start(2)] + abs_content + num_xml[abs_match.end(2):]
+        print('      ✓ abstractNumId=0 样式链接已完善')
 
-    changes = {'ch': 0, 'h2': 0, 'h3': 0}
-    strip_count = 0
-    modifications = []
+    # ===== 层面二: Step B — 统一 styles.xml =====
+    print('\n  [B] 统一 styles.xml — 所有标题样式指向同一多级列表...')
 
-    for start, end, para in all_paras:
-        style_m = re.search(r'<w:pStyle w:val="(12|13|14|15|16)"/>', para)
-        if not style_m:
+    target_map = {
+        '12': ('0', 'hik标题1/章节'),
+        '13': ('1', 'hik标题2/H2'),
+        '14': ('2', 'hik标题3/H3'),
+        '15': ('3', 'hik标题4/H4'),
+        '16': ('4', 'hik标题5/H5'),
+    }
+    style_fix_log = []
+
+    for sid, (target_ilvl, sname) in target_map.items():
+        sid_escaped = re.escape(sid)
+        sm = re.search(
+            r'(<w:style\b[^>]*\bw:styleId="' + sid_escaped + r'"[^>]*>)',
+            styles_xml)
+        if not sm:
+            continue
+        style_start_pos = sm.start()
+        style_end = styles_xml.find('</w:style>', style_start_pos)
+        if style_end == -1:
+            continue
+        style_block = styles_xml[style_start_pos:style_end + len('</w:style>')]
+
+        numpr_in_style = re.search(r'<w:numPr>(.*?)</w:numPr>', style_block, re.DOTALL)
+        needs_fix = False
+        fix_desc = ""
+
+        if numpr_in_style:
+            np_content = numpr_in_style.group(1)
+            cur_nid_m = re.search(r'<w:numId\s+w:val="(\d+)"', np_content)
+            cur_ilvl_m = re.search(r'<w:ilvl\s+w:val="(\d+)"', np_content)
+            cur_nid = cur_nid_m.group(1) if cur_nid_m else None
+            cur_ilvl = cur_ilvl_m.group(1) if cur_ilvl_m else None
+            if cur_nid != UNIFIED_NUM_ID or cur_ilvl != target_ilvl:
+                needs_fix = True
+                fix_desc = f"numId={cur_nid}, ilvl={cur_ilvl} → ({UNIFIED_NUM_ID}, {target_ilvl})"
+        else:
+            needs_fix = True
+            fix_desc = "无numPr → 插入"
+
+        if not needs_fix:
             continue
 
-        style_val = style_m.group(1)
-        has_numPr = bool(re.search(r'<w:numPr>', para))
+        print(f'      🔧 style {sid}({sname}): {fix_desc}')
+
+        correct_numpr = (
+            f'<w:numPr>'
+            f'<w:numId w:val="{UNIFIED_NUM_ID}"/>'
+            f'<w:ilvl w:val="{target_ilvl}"/></w:numPr>')
+
+        if numpr_in_style:
+            old_numpr_full = f'<w:numPr>{numpr_in_style.group(1)}</w:numPr>'
+            new_block = style_block.replace(old_numpr_full, correct_numpr, 1)
+        elif '<w:pPr>' in style_block:
+            new_block = style_block.replace('<w:pPr>', f'<w:pPr>{correct_numpr}', 1)
+        elif '<w:pPr/>' in style_block:
+            new_block = style_block.replace('<w:pPr/>',
+                f'<w:pPr>{correct_numpr}</w:pPr>', 1)
+        else:
+            first_child = re.search(r'<w:(?!/)', style_block[sm.end():])
+            if first_child:
+                insert_pos = sm.end() + first_child.start()
+                new_block = (style_block[:insert_pos] +
+                    f'<w:pPr>{correct_numpr}</w:pPr>\n' +
+                    style_block[insert_pos:])
+            else:
+                new_block = style_block
+
+        styles_xml = styles_xml[:style_start_pos] + new_block + \
+                     styles_xml[style_end + len('</w:style>'):]
+        style_fix_log.append((sid, sname))
+
+    print(f'      ✓ 样式定义已修复: {len(style_fix_log)} 个')
+
+    # ===== 层面三: Step C — 补全 document.xml 段落级 numPr =====
+    print('\n  [C] 补全 document.xml 段落级 numPr...')
+
+    pr_templates = {
+        '12': (f'<w:numPr><w:numId w:val="{UNIFIED_NUM_ID}"/><w:ilvl w:val="0"/></w:numPr>', '章节'),
+        '13': (f'<w:numPr><w:numId w:val="{UNIFIED_NUM_ID}"/><w:ilvl w:val="1"/></w:numPr>', 'H2'),
+        '14': (f'<w:numPr><w:numId w:val="{UNIFIED_NUM_ID}"/><w:ilvl w:val="2"/></w:numPr>', 'H3'),
+        '15': (f'<w:numPr><w:numId w:val="{UNIFIED_NUM_ID}"/><w:ilvl w:val="3"/></w:numPr>', 'H4'),
+        '16': (f'<w:numPr><w:numId w:val="{UNIFIED_NUM_ID}"/><w:ilvl w:val="4"/></w:numPr>', 'H5'),
+    }
+
+    all_paras = find_all_paras_positions(doc_xml)
+
+    modifications = []
+    counts = {'12': 0, '13': 0, '14': 0, '15': 0, '16': 0}
+    strip_count = 0
+
+    for start, end, para in all_paras:
+        style_m = re.search(r'w:pStyle\s+w:val="(12|13|14|15|16)"', para)
+        if not style_m:
+            continue
+        sid = style_m.group(1)
+        has_numpr = bool(re.search(r'<w:numPr>', para))
         new_para = para
         modified = False
 
-        # Insert numPr for styles 12/13/14 only (if missing)
-        if not has_numPr and style_val in ('12', '13', '14'):
-            if style_val == '12':
-                numPr, key = numPr_ch, 'ch'
-            elif style_val == '13':
-                numPr, key = numPr_h2, 'h2'
-            else:  # '14'
-                numPr, key = numPr_h3, 'h3'
-
+        if not has_numpr:
+            correct_pr, _ = pr_templates[sid]
             if '<w:pPr>' in new_para:
-                new_para = new_para.replace('<w:pPr>', f'<w:pPr>{numPr}', 1)
+                new_para = new_para.replace('<w:pPr>',
+                    f'<w:pPr>{correct_pr}', 1)
             elif '<w:pPr/>' in new_para:
-                new_para = new_para.replace('<w:pPr/>', f'<w:pPr>{numPr}</w:pPr>', 1)
+                new_para = new_para.replace('<w:pPr/>',
+                    f'<w:pPr>{correct_pr}</w:pPr>', 1)
             else:
-                new_para = re.sub(
-                    r'(<w:p[ >][^>]*>)',
-                    rf'\g<1><w:pPr>{numPr}</w:pPr>',
-                    new_para, count=1)
-
-            changes[key] += 1
+                tag_m = re.match(r'(.*?<w:p\b[^>]*>)(.*)', new_para, re.DOTALL)
+                if tag_m:
+                    new_para = (tag_m.group(1) +
+                        f'<w:pPr>{correct_pr}</w:pPr>' + tag_m.group(2))
+            counts[sid] += 1
             modified = True
 
-        # Strip leading number prefix from text (all heading levels 12-16)
-        t_match = re.search(r'(<w:t[^>]*>)(.*?)(</w:t>)', new_para)
-        if t_match:
-            old_text = t_match.group(2)
-            # Remove leading digits+dots like "9.6." or "9.6.1."
-            new_text = re.sub(r'^[\d\.]+[\s\u3000]*', '', old_text)
-            if new_text != old_text:
+        # 清除残留数字前缀（所有标题级别）
+        for t_m in reversed(list(re.finditer(
+                r'(<w:t(?:\s[^>]*)?>)([^<]*)(</w:t>)', new_para))):
+            prefix = t_m.group(2)
+            new_text = re.sub(r'^[\d\.]+[\s\u3000\u00a0]+', '', prefix)
+            if new_text != prefix:
                 strip_count += 1
-                new_para = (new_para[:t_match.start()] +
-                           t_match.group(1) + new_text + t_match.group(3) +
-                           new_para[t_match.end():])
+                new_para = (new_para[:t_m.start()] + t_m.group(1) +
+                           new_text + t_m.group(3) + new_para[t_m.end():])
                 modified = True
 
         if modified:
             modifications.append((start, end, new_para))
 
-    # Apply in reverse order to preserve positions
+    # 倒序应用以保持位置正确
     for s, e, nc in reversed(modifications):
         doc_xml = doc_xml[:s] + nc + doc_xml[e:]
 
-    print(f'      ✓ 章节标题(style12/ilvl0): +{changes["ch"]}')
-    print(f'      ✓ 二级标题(style13/ilvl1): +{changes["h2"]}')
-    print(f'      ✓ 三级标题(style14/ilvl2): +{changes["h3"]}')
-    print(f'      ✓ 清除残留编号前缀: {strip_count} 处')
+    total_fixed = sum(counts.values())
+    for sid in sorted(counts.keys()):
+        _, name = pr_templates[sid]
+        if counts[sid] > 0:
+            print(f'      ✓ {name}(style{sid}): +{counts[sid]} 个 numPr')
+    print(f'      ✓ 清除残留前缀: {strip_count} 处')
 
     report = {
-        'num_chapter': changes['ch'],
-        'num_h2': changes['h2'],
-        'num_h3': changes['h3'],
+        'num_chapter': counts.get('12', 0),
+        'num_h2': counts.get('13', 0),
+        'num_h3': counts.get('14', 0),
+        'num_h4': counts.get('15', 0),
+        'num_h5': counts.get('16', 0),
+        'style_fixes': len(style_fix_log),
         'strip_prefixes': strip_count,
     }
-    total_fixed = changes['ch'] + changes['h2'] + changes['h3']
-    print(f'\n  Phase 0 完成: 插入{total_fixed}个numPr + 去除{strip_count}个残留前缀')
-    return doc_xml, num_xml, report
+
+    print(f'\n  Phase 0 完成: 三层面统一修复完成')
+    print(f'      • numbering.xml: 补全pStyle链接')
+    print(f'      • styles.xml: 统一{len(style_fix_log)}个样式的numPr')
+    print(f'      • document.xml: 补全{total_fixed}个段落的numPr + 去除{strip_count}个前缀')
+
+    return doc_xml, num_xml, styles_xml, report
 
 
 # ================================================================
@@ -760,15 +879,17 @@ def main():
         with open(sty_path, 'r', encoding='utf-8') as f:
             sty_xml = f.read()
 
-        # ---- Phase 0: H2/H3 编号跟随修复 ----
+        # ---- Phase 0: 根本性编号修复（三层面统一） ----
         rpt0 = {}
         if args.phase in ('0', 'all'):
-            doc_xml, num_xml, rpt0 = phase0_fix_heading_numbering(doc_xml, num_xml)
+            doc_xml, num_xml, styles_xml, rpt0 = phase0_fix_heading_numbering(doc_xml, num_xml, sty_xml)
 
             with open(doc_path, 'w', encoding='utf-8') as f:
                 f.write(doc_xml)
             with open(num_path, 'w', encoding='utf-8') as f:
                 f.write(num_xml)
+            with open(sty_path, 'w', encoding='utf-8') as f:
+                f.write(styles_xml)
 
         # ---- Phase 1: 编号修复 ----
         rpt1 = {}
@@ -813,11 +934,15 @@ def main():
         print(f'\n   ══════════ 汇总报告 ══════════')
 
         if args.phase in ('0', 'all'):
-            print(f'\n   📋 Phase 0 - H2/H3 编号跟随修复:')
-            print(f'      • 章节标题插入numPr: {rpt0.get("num_chapter", 0)} 处')
-            print(f'      • 二级标题插入numPr: {rpt0.get("num_h2", 0)} 处')
-            print(f'      • 三级标题插入numPr: {rpt0.get("num_h3", 0)} 处')
-            print(f'      • 残留编号前缀清除:   {rpt0.get("strip_prefixes", 0)} 处')
+            print(f'\n   📋 Phase 0 - 根本性编号修复（三层面统一）:')
+            print(f'      • numbering.xml: 补全主列表pStyle链接')
+            print(f'      • styles.xml: 统一{rpt0.get("style_fixes", 0)}个样式的numPr')
+            print(f'      • 章节标题(style12)插入numPr: {rpt0.get("num_chapter", 0)} 处')
+            print(f'      • 二级标题(style13)插入numPr: {rpt0.get("num_h2", 0)} 处')
+            print(f'      • 三级标题(style14)插入numPr: {rpt0.get("num_h3", 0)} 处')
+            print(f'      • 四级标题(style15)插入numPr: {rpt0.get("num_h4", 0)} 处')
+            print(f'      • 五级标题(style16)插入numPr: {rpt0.get("num_h5", 0)} 处')
+            print(f'      • 残留编号前缀清除:       {rpt0.get("strip_prefixes", 0)} 处')
 
         if args.phase in ('1', 'all'):
             print(f'\n   📋 Phase 1 - 编号层级修复:')
