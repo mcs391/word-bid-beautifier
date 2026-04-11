@@ -762,6 +762,25 @@ def find_named_style_id(style_xml, candidates):
     return None
 
 
+def find_table_body_style_id(style_xml):
+    """识别表格正文样式，兼容历史模板中的旧命名。"""
+    preferred = find_named_style_id(style_xml, ["ryusuke-表格正文"])
+    if preferred:
+        return preferred
+
+    style_pattern = r'<w:style\b(?=[^>]*w:type="paragraph")(?=[^>]*w:styleId="([^"]+)")[^>]*>.*?</w:style>'
+    for m in re.finditer(style_pattern, style_xml, re.DOTALL):
+        style_id = m.group(1)
+        block = m.group(0)
+        name = re.search(r'<w:name w:val="([^"]+)"', block)
+        if name and "表格正文" in name.group(1):
+            return style_id
+
+    if re.search(r'<w:style\b(?=[^>]*w:type="paragraph")(?=[^>]*w:styleId="37")', style_xml):
+        return "37"
+    return None
+
+
 def resolve_ryusuke_heading_style_ids(style_xml):
     """把脚本内部 H4/H5 指向当前文档真实标题样式，避免固定 styleId 误伤。"""
     global STYLE_RYUSUKE_H4, STYLE_RYUSUKE_H5
@@ -819,15 +838,12 @@ def rename_ryusuke_heading_style_names(style_xml):
 
 
 def upsert_ryusuke_table_body_style(style_xml):
-    """把 hik-表格正文 统一纳入 ryusuke-表格正文，并固化表格正文排版。"""
+    """把历史表格正文样式统一纳入 ryusuke-表格正文，并固化表格正文排版。"""
     global STYLE_RYUSUKE_TABLE_BODY
     result = style_xml
     changes = []
 
-    style_id = find_named_style_id(
-        result,
-        ["hik-表格正文", "ryusuke-表格正文", "表格正文"],
-    )
+    style_id = find_table_body_style_id(result)
     if style_id:
         STYLE_RYUSUKE_TABLE_BODY = style_id
 
