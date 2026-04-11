@@ -73,6 +73,7 @@ document.docx (ZIP)
 | 17 | ryusuke-标题6 | 六级标题 | %1...%6. |
 | 11 | ryusuke正文 | 正文 | 宋体, 12pt |
 | 25 | ryusuke首行缩进两字符 | 缩进正文 | 首行缩进2字符 |
+| 37 | ryusuke-表格正文 | 表格正文 | 居中, 宋体, 10.5pt |
 
 ## 编号系统 (numbering.xml)
 

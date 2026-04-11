@@ -49,6 +49,7 @@ STYLE_RYUSUKE_H4 = "15"       # ryusuke标题4
 STYLE_RYUSUKE_H5 = "16"       # ryusuke标题5
 STYLE_RYUSUKE_BODY = "11"     # ryusuke正文
 STYLE_RYUSUKE_INDENT = "25"   # ryusuke首行缩进两字符
+STYLE_RYUSUKE_TABLE_BODY = "ryusukeTableBody"  # ryusuke-表格正文
 DEFAULT_INDENT_H4 = 360
 DEFAULT_INDENT_H5 = 480
 
@@ -749,6 +750,18 @@ def find_heading_style_id(style_xml, level):
     return None
 
 
+def find_named_style_id(style_xml, candidates):
+    """按显示名查找段落样式 ID。"""
+    normalized = {candidate.strip().lower() for candidate in candidates}
+    style_pattern = r'<w:style\b(?=[^>]*w:type="paragraph")(?=[^>]*w:styleId="([^"]+)")[^>]*>.*?</w:style>'
+    for m in re.finditer(style_pattern, style_xml, re.DOTALL):
+        block = m.group(0)
+        name = re.search(r'<w:name w:val="([^"]+)"', block)
+        if name and name.group(1).strip().lower() in normalized:
+            return m.group(1)
+    return None
+
+
 def resolve_ryusuke_heading_style_ids(style_xml):
     """把脚本内部 H4/H5 指向当前文档真实标题样式，避免固定 styleId 误伤。"""
     global STYLE_RYUSUKE_H4, STYLE_RYUSUKE_H5
@@ -805,6 +818,53 @@ def rename_ryusuke_heading_style_names(style_xml):
     return result, changes
 
 
+def upsert_ryusuke_table_body_style(style_xml):
+    """把 hik-表格正文 统一纳入 ryusuke-表格正文，并固化表格正文排版。"""
+    global STYLE_RYUSUKE_TABLE_BODY
+    result = style_xml
+    changes = []
+
+    style_id = find_named_style_id(
+        result,
+        ["hik-表格正文", "ryusuke-表格正文", "表格正文"],
+    )
+    if style_id:
+        STYLE_RYUSUKE_TABLE_BODY = style_id
+
+    style_id = STYLE_RYUSUKE_TABLE_BODY
+    style_re = rf'(<w:style\b(?=[^>]*w:type="paragraph")(?=[^>]*w:styleId="{re.escape(style_id)}")[^>]*>)(.*?)(</w:style>)'
+    target_block = (
+        '<w:name w:val="ryusuke-表格正文"/>'
+        '<w:qFormat/>'
+        '<w:uiPriority w:val="0"/>'
+        '<w:pPr><w:jc w:val="center"/></w:pPr>'
+        '<w:rPr>'
+        '<w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体" w:cs="Times New Roman"/>'
+        '<w:bCs/>'
+        '<w:kern w:val="2"/>'
+        '<w:sz w:val="21"/>'
+        '<w:szCs w:val="24"/>'
+        '<w:lang w:val="en-US" w:eastAsia="zh-CN" w:bidi="ar-SA"/>'
+        '</w:rPr>'
+    )
+
+    m = re.search(style_re, result, re.DOTALL)
+    if m:
+        if target_block not in m.group(2):
+            result = result[:m.start(2)] + target_block + result[m.end(2):]
+            changes.append(f'表格正文: 显示名和格式统一为ryusuke-表格正文(styleId={style_id})')
+    else:
+        new_style = (
+            f'<w:style w:type="paragraph" w:customStyle="1" w:styleId="{style_id}">'
+            f'{target_block}'
+            '</w:style>'
+        )
+        result = result.replace('</w:styles>', new_style + '</w:styles>')
+        changes.append(f'表格正文: 新增ryusuke-表格正文(styleId={style_id})')
+
+    return result, changes
+
+
 def optimize_styles(style_xml):
     """精修 ryusuke标题样式属性"""
     changes = []
@@ -840,6 +900,8 @@ def optimize_styles(style_xml):
 
     result, rename_changes = rename_ryusuke_heading_style_names(result)
     changes.extend(rename_changes)
+    result, table_changes = upsert_ryusuke_table_body_style(result)
+    changes.extend(table_changes)
 
     # --- ryusuke标题4 ---
     old_s = r'<w:spacing w:before="120" w:after="120" w:line="360" w:lineRule="auto"/>'

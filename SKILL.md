@@ -48,6 +48,7 @@ ilvl=4: %1.%2.%3.%4.%5. → style 16 (五级标题 H5)
 - **正文首行缩进** — 为无样式的中文正文添加标准缩进
 - **多级列表缩进优化** — 调整 numbering.xml 中各级 left/hanging 值
 - **字体/间距精修** — 统一黑体、明确字号、优化段前/后距和行距
+- **表格正文样式统一** — 自动识别并将 `hik-表格正文` 重命名/固化为 `ryusuke-表格正文`，用于表格内容美化
 
 **核心原则：零内容删除，仅修改格式属性。**
 
@@ -168,6 +169,9 @@ python scripts/bid_doc_optimizer.py input.docx output.docx \
 **Step K — 样式属性精修（styles.xml）**
 字体/间距/行距/字号全面精修。
 
+**Step L — 表格正文样式接管**
+识别 Word 中已有的 `hik-表格正文` 样式，并统一改为 `ryusuke-表格正文`；若文档缺失该样式，则自动补建一套表格正文样式，便于后续手动或批量套用。
+
 ## 关键经验教训
 
 ### ⚠️ 必须避开的坑
@@ -198,6 +202,7 @@ python scripts/bid_doc_optimizer.py input.docx output.docx \
 - 多级标题段间距递减：一级→二级→三级 逐级缩小 1~2pt
 - 行距建议 1.25~1.5 倍（lineRule=auto 时 line=280~360）
 - 首行缩进 2 字符（约 480 twips 或 `w:firstLineChars="200"`）
+- 表格正文建议使用居中对齐、小四字号（10.5pt）、宋体中文与 Times New Roman 西文组合，保证表内数据清晰统一
 
 ## 文件清单
 
