@@ -1,6 +1,6 @@
 # 📝 Word 投标文档一键美化工具
 
-> **word-bid-beautifier** — 专为华数/海康威视(HIK)格式投标技术文件设计的自动化排版优化工具
+> **word-bid-beautifier** — 专为投标技术文件设计的自动化排版优化工具
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
